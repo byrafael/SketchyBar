@@ -77,6 +77,7 @@ bool bar_manager_set_displays(struct bar_manager* bar_manager, uint32_t displays
 bool bar_manager_set_hidden(struct bar_manager* bar_manager, uint32_t sid, bool hidden);
 bool bar_manager_set_topmost(struct bar_manager* bar_manager, char level, bool topmost);
 bool bar_manager_set_sticky(struct bar_manager *bar_manager, bool sticky);
+bool bar_manager_set_workspace_source(struct bar_manager* bar_manager, bool paneru);
 bool bar_manager_set_shadow(struct bar_manager* bar_manager, bool shadow);
 bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smoothing);
 bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen);

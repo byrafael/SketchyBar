@@ -10,6 +10,7 @@
 #include "mouse.h"
 #include "media.h"
 #include "app_windows.h"
+#include "paneru.h"
 
 extern void forced_front_app_event();
 
@@ -45,6 +46,8 @@ void bar_manager_init(struct bar_manager* bar_manager) {
   bar_manager->sticky = true;
 
   bar_manager->show_in_fullscreen = false;
+  // A config reload starts from native spaces until the config asks again.
+  paneru_set_enabled(false);
 
   image_init(&bar_manager->current_artwork);
   background_init(&bar_manager->background);
@@ -261,6 +264,12 @@ bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smooth
   return true;
 }
 
+bool bar_manager_set_workspace_source(struct bar_manager* bar_manager, bool paneru) {
+  if (!paneru_set_enabled(paneru)) return false;
+  bar_manager_handle_space_change(bar_manager, true);
+  return true;
+}
+
 bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen) {
     if (bar_manager->show_in_fullscreen == show_in_fullscreen) return false;
     bar_manager->show_in_fullscreen = show_in_fullscreen;
@@ -391,7 +400,7 @@ bool bar_manager_bar_needs_redraw(struct bar_manager* bar_manager, struct bar* b
 
     bool drawn_on_non_associated_space = bar_item->associated_space > 0
                                          && !(bar_item->associated_space
-                                              & (1 << bar->sid))
+                                              & (1 << bar->workspace))
                                          && ((bar_item->associated_bar << 1)
                                              & bar_mask);
 
@@ -400,7 +409,7 @@ bool bar_manager_bar_needs_redraw(struct bar_manager* bar_manager, struct bar* b
     bool not_drawn_on_associated_space = draws_item
                                          && bar_item->associated_space > 0
                                          && (bar_item->associated_space
-                                             & (1 << bar->sid))
+                                             & (1 << bar->workspace))
                                          && !((bar_item->associated_bar << 1)
                                               & bar_mask);
 
@@ -486,12 +495,25 @@ void bar_manager_update_space_components(struct bar_manager* bar_manager, bool f
 
     if (!bar_item->overrides_association) {
       uint32_t space = get_set_bit_position(bar_item->associated_space);
-      uint32_t space_did = display_id_for_space(space);
-      if (space_did) {
-        bar_item->associated_display = 1 << (display_arrangement(space_did));
+      if (paneru_enabled()) {
+        // Every display has its own Paneru workspace N: draw the item on each
+        // display whose current Space has one.
+        uint32_t displays = 0;
+        for (int j = 0; j < bar_manager->bar_count; j++) {
+          struct bar* bar = bar_manager->bars[j];
+          if (paneru_has_workspace(bar->dsid, space))
+            displays |= 1 << bar->adid;
+        }
+        bar_item->associated_display = displays ? displays : 1 << 30;
       }
       else {
-        bar_item->associated_display = 1 << 30;
+        uint32_t space_did = display_id_for_space(space);
+        if (space_did) {
+          bar_item->associated_display = 1 << (display_arrangement(space_did));
+        }
+        else {
+          bar_item->associated_display = 1 << 30;
+        }
       }
     }
     for (int j = 0; j < bar_manager->bar_count; j++) {
@@ -499,8 +521,10 @@ void bar_manager_update_space_components(struct bar_manager* bar_manager, bool f
       uint32_t did = bar->adid;
 
       if ((1 << did) & bar_item->associated_display) {
-        uint32_t sid = bar->sid;
-        if (sid == 0) continue;
+        uint32_t sid = bar->workspace;
+        // An unknown Mission Control index keeps the last selection; no Paneru
+        // workspace (Paneru is not running) deselects every item.
+        if (sid == 0 && !paneru_enabled()) continue;
         if ((!bar_item->selected || forced)
             && bar_item->associated_space & (1 << sid)) {
           bar_item->selected = true;
@@ -955,6 +979,9 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
   for (int i = 0; i < bar_manager->bar_count; i++) {
     uint64_t dsid = display_space_id(bar_manager->bars[i]->did);
     bar_manager->bars[i]->sid = mission_control_index(dsid);
+    bar_manager->bars[i]->workspace = paneru_enabled()
+                                      ? paneru_selected_workspace(dsid)
+                                      : bar_manager->bars[i]->sid;
 
     bool was_shown = bar_manager->bars[i]->shown;
     bar_manager->bars[i]->shown = SLSSpaceGetType(g_connection, dsid) != 4 || bar_manager->show_in_fullscreen;
@@ -974,7 +1001,7 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
     snprintf(info + cursor, 19 * bar_manager->bar_count + 4 - cursor,
                             "\t\"display-%d\": %d%s\n",
                             bar_manager->bars[i]->adid,
-                            bar_manager->bars[i]->sid,
+                            bar_manager->bars[i]->workspace,
                             separator                                );
     cursor = strlen(info);
   }
@@ -987,6 +1014,9 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
   bar_manager_custom_events_trigger(bar_manager,
                                     COMMAND_SUBSCRIBE_SPACE_CHANGE,
                                     &env_vars                      );
+
+  // A native Space change shows another set of Paneru workspaces.
+  if (paneru_enabled()) paneru_post_space_windows(forced);
 
 
   bar_manager_unfreeze(bar_manager);
@@ -1107,6 +1137,7 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
                "%s\"shadow\": \"%s\",\n"
                "%s\"font_smoothing\": \"%s\",\n"
                "%s\"show_in_fullscreen\": \"%s\",\n"
+               "%s\"workspace_source\": \"%s\",\n"
                "%s\"blur_radius\": %u,\n"
                "%s\"margin\": %d,\n",
                indent, bar_manager->position == POSITION_BOTTOM
@@ -1117,6 +1148,7 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
                indent, format_bool(bar_manager->shadow),
                indent, format_bool(bar_manager->font_smoothing),
                indent, format_bool(bar_manager->show_in_fullscreen),
+               indent, paneru_enabled() ? "paneru" : "native",
                indent, bar_manager->blur_radius,
                indent, bar_manager->margin         );
 

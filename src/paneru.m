@@ -24,6 +24,9 @@ extern struct bar_manager g_bar_manager;
 #define PANERU_QUERY_TIMEOUT_MS 2000
 #define PANERU_RETRY_MIN_S 1
 #define PANERU_RETRY_MAX_S 8
+// A daemon that is still starting drops queries. Ask again this soon, for as
+// long as its subscription stays open.
+#define PANERU_REFRESH_RETRY_MS 500
 
 struct paneru_row {
   uint32_t number;
@@ -373,9 +376,7 @@ static bool paneru_follow(char* binary, uint64_t generation) {
   if (!current) kill(pid, SIGTERM);
   else {
     // Subscribe first, then read, so a change between the two is not lost.
-    connected = paneru_refresh(binary, generation);
-
-    struct line_reader reader = { .refresh_at_ms = -1 };
+    struct line_reader reader = { .refresh_at_ms = paneru_now_ms() };
     for (;;) {
       int timeout_ms = -1;
       if (reader.refresh_at_ms >= 0) {
@@ -389,8 +390,12 @@ static bool paneru_follow(char* binary, uint64_t generation) {
       if (ready > 0 && !paneru_read_lines(fd, &reader)) break;
 
       if (reader.refresh_at_ms >= 0 && paneru_now_ms() >= reader.refresh_at_ms) {
-        reader.refresh_at_ms = -1;
-        connected |= paneru_refresh(binary, generation);
+        if (paneru_refresh(binary, generation)) {
+          connected = true;
+          reader.refresh_at_ms = -1;
+        } else {
+          reader.refresh_at_ms = paneru_now_ms() + PANERU_REFRESH_RETRY_MS;
+        }
       }
     }
     free(reader.buffer);

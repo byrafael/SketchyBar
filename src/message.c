@@ -442,6 +442,18 @@ static bool handle_domain_bar(FILE *rsp, struct token domain, char *message) {
             &g_bar_manager,
             g_bar_manager.background.bounds.size.height,
             token_to_int(token)                         );
+  } else if (token_equals(command, PROPERTY_WORKSPACE_SOURCE)) {
+    struct token token = get_token(&message);
+    if (token_equals(token, ARGUMENT_WORKSPACE_SOURCE_PANERU)) {
+      needs_refresh = bar_manager_set_workspace_source(&g_bar_manager, true);
+    } else if (token_equals(token, ARGUMENT_WORKSPACE_SOURCE_NATIVE)) {
+      needs_refresh = bar_manager_set_workspace_source(&g_bar_manager, false);
+    } else {
+      respond(rsp, "[!] Bar: Invalid workspace_source '%s', expected '%s' or '%s'\n",
+                   token.text,
+                   ARGUMENT_WORKSPACE_SOURCE_NATIVE,
+                   ARGUMENT_WORKSPACE_SOURCE_PANERU                             );
+    }
   } else if (token_equals(command, PROPERTY_SHOW_IN_FULLSCREEN)) {
       struct token token = get_token(&message);
 

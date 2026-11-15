@@ -2,6 +2,7 @@
 #include "workspace.h"
 #include "misc/helpers.h"
 #include "event.h"
+#include "paneru.h"
 
 extern pid_t g_pid;
 struct app_windows g_windows = { 0 };
@@ -105,6 +106,9 @@ static bool app_window_suitable(struct app_window* window) {
 }
 
 static void app_windows_post_event_for_space(struct app_windows* windows, uint64_t sid) {
+  // Mission Control indices mean nothing to Paneru workspace items.
+  if (paneru_enabled()) return;
+
   int index = mission_control_index(sid);
   pid_t pid_list[windows->num_windows];
   uint32_t pid_count[windows->num_windows];
@@ -285,7 +289,8 @@ static void space_handler(uint32_t event, void* data, size_t data_length, void* 
 }
 
 void forced_space_windows_event() {
-  if (g_space_window_events) update_all_spaces(&g_windows, false);
+  if (paneru_enabled()) paneru_post_space_windows(true);
+  else if (g_space_window_events) update_all_spaces(&g_windows, false);
 }
 
 void begin_receiving_space_window_events() {

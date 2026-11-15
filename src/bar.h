@@ -9,6 +9,9 @@ struct bar {
   bool mouse_over;
 
   uint32_t sid;
+  // The number space items and `space=` associations match: the Mission
+  // Control index, or the Paneru workspace with `workspace_source=paneru`.
+  uint32_t workspace;
   uint32_t dsid;
   uint32_t did;
   uint32_t adid;

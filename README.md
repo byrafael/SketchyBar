@@ -68,6 +68,40 @@ for some further tips on your journey. If you are searching for functional items
 Should you encounter things not working as you expect them to, please *do not* hesitate to open an [issue](https://github.com/FelixKratz/SketchyBar/issues), as
 this is either a bug or a documentation problem and relevant in any case.
 
+## Paneru workspaces
+
+This fork can show [Paneru](https://github.com/karinushka/paneru)'s virtual
+workspaces in space items. Paneru keeps several workspaces inside one macOS
+Space, so Mission Control indices cannot tell them apart.
+
+```bash
+sketchybar --bar workspace_source=paneru
+
+for i in 1 2 3 4 5; do
+  sketchybar --add space space.$i left \
+             --set space.$i associated_space=$i icon=$i \
+                   click_script="paneru send-cmd window virtualnum $i"
+done
+```
+
+With `workspace_source=paneru`:
+
+- `associated_space=N` (or `space=N`) means Paneru workspace N on the
+  display's current macOS Space. A space item is drawn on every display that
+  has a workspace N, and hidden where there is none.
+- `SELECTED` is true for the workspace each display shows.
+- `space_change` reports each display's Paneru workspace number.
+- `space_windows_change` reports the apps on each Paneru workspace, in strip
+  order. Its `INFO` adds a `display` key, because every display has its own
+  workspace 1:
+  `{"space": 2, "display": 1, "apps": {"Safari": 1, "Terminal": 2}}`.
+
+The bar runs `paneru subscribe` and re-reads `paneru query state` when the
+workspace rows change. It finds `paneru` on `PATH`, then in `~/.cargo/bin`,
+`/opt/homebrew/bin` and `/usr/local/bin`. While Paneru is not running, no
+workspace is shown, and the bar reconnects when Paneru is back.
+`workspace_source=native` (the default) restores Mission Control spaces.
+
 ## Documentation
 For the full documentation of all commands and properties please refer to the [website](https://felixkratz.github.io/SketchyBar/config/bar).
 

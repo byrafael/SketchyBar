@@ -2,6 +2,7 @@
 #include "bar_manager.h"
 #include "custom_events.h"
 #include "hotload.h"
+#include "paneru.h"
 
 extern struct bar_manager g_bar_manager;
 extern int g_connection;
@@ -336,6 +337,10 @@ static void event_space_windows_changed(void* context) {
   bar_manager_handle_space_windows_change(&g_bar_manager, (char*)context);
 }
 
+static void event_paneru_state_changed(void* context) {
+  paneru_handle_state((struct paneru_state*)context);
+}
+
 static void event_hotload(void* context) {
   bar_manager_destroy(&g_bar_manager);
   bar_manager_init(&g_bar_manager);
@@ -372,6 +377,7 @@ static callback_type* event_handler[] = {
   [MACH_MESSAGE]               = event_mach_message,
   [HOTLOAD]                    = event_hotload,
   [SPACE_WINDOWS_CHANGED]      = event_space_windows_changed,
+  [PANERU_STATE_CHANGED]       = event_paneru_state_changed,
 };
 
 

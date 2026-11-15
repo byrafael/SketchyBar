@@ -4,6 +4,7 @@
 #include "display.h"
 #include "misc/helpers.h"
 #include "window.h"
+#include "paneru.h"
 
 extern int workspace_display_notch_height(uint32_t did);
 
@@ -18,7 +19,7 @@ bool bar_draws_item(struct bar* bar, struct bar_item* bar_item) {
       return false;
 
     if (bar_item->associated_space > 0
-        && (!(bar_item->associated_space & (1 << bar->sid))
+        && (!(bar_item->associated_space & (1 << bar->workspace))
             && !bar_item->ignore_association)
         && (bar_item->type != BAR_COMPONENT_SPACE)        )
       return false;
@@ -553,6 +554,8 @@ struct bar *bar_create(uint32_t did) {
   bar->did = did;
   bar->dsid = display_space_id(did);
   bar->sid = mission_control_index(bar->dsid);
+  bar->workspace = paneru_enabled() ? paneru_selected_workspace(bar->dsid)
+                                    : bar->sid;
   bar->shown = SLSSpaceGetType(g_connection, bar->dsid) != 4;
   g_bar_manager.bar_needs_update = true;
   bar_create_window(bar);

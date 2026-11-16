@@ -341,6 +341,10 @@ static void event_paneru_state_changed(void* context) {
   paneru_handle_state((struct paneru_state*)context);
 }
 
+static void event_paneru_event(void* context) {
+  paneru_handle_event((struct paneru_forward*)context);
+}
+
 static void event_hotload(void* context) {
   bar_manager_destroy(&g_bar_manager);
   bar_manager_init(&g_bar_manager);
@@ -378,6 +382,7 @@ static callback_type* event_handler[] = {
   [HOTLOAD]                    = event_hotload,
   [SPACE_WINDOWS_CHANGED]      = event_space_windows_changed,
   [PANERU_STATE_CHANGED]       = event_paneru_state_changed,
+  [PANERU_EVENT]               = event_paneru_event,
 };
 
 

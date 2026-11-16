@@ -96,6 +96,24 @@ With `workspace_source=paneru`:
   workspace 1:
   `{"space": 2, "display": 1, "apps": {"Safari": 1, "Terminal": 2}}`.
 
+Paneru's own events reach scripts as `paneru_<event>`, with the event's JSON
+line as `INFO`: `paneru_window_focused`, `paneru_window_title_changed`,
+`paneru_windows_changed`, `paneru_virtual_workspace_changed` and
+`paneru_display_changed`. Register one with `--add event` before subscribing:
+
+```bash
+sketchybar --add event paneru_window_focused \
+           --subscribe window_title paneru_window_focused
+```
+
+`on_screen_changed` fires every few milliseconds while windows move and is not
+forwarded. When a workspace disappears, `space_windows_change` reports it once
+with `"apps": {}`.
+
+`app.<name>` images look for an installed app bundle named `<name>.app` before
+the running app's bundle identifier, so web apps that share one runtime (Firefox
+PWAs, Chrome apps) show their own icons.
+
 The bar runs `paneru subscribe` and re-reads `paneru query state` when the
 workspace rows change. It finds `paneru` on `PATH`, then in `~/.cargo/bin`,
 `/opt/homebrew/bin` and `/usr/local/bin`. While Paneru is not running, no

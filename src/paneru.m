@@ -101,14 +101,20 @@ static void json_append_string(NSMutableString* out, NSString* string) {
   [out appendString:@"\""];
 }
 
+static bool json_bool(id value, bool fallback);
+
 // `{"Name": count, ...}` in the order the apps first appear on the row, which
-// is Paneru's left-to-right strip order.
+// is Paneru's left-to-right strip order. Floating windows are left out: Paneru
+// lists them under whichever workspace is shown, since they stay on screen
+// across workspaces, so they belong to none. An app's hidden helper window
+// would otherwise follow every switch.
 static char* paneru_apps_json(NSArray* windows) {
   NSMutableArray* names = [NSMutableArray array];
   NSMutableDictionary* counts = [NSMutableDictionary dictionary];
   if ([windows isKindOfClass:[NSArray class]]) {
     for (id window in windows) {
       if (![window isKindOfClass:[NSDictionary class]]) continue;
+      if (json_bool(window[@"floating"], false)) continue;
       id name = window[@"app_name"];
       if (![name isKindOfClass:[NSString class]] || [name length] == 0) continue;
       NSNumber* count = counts[name];

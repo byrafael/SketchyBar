@@ -91,9 +91,10 @@ With `workspace_source=paneru`:
   has a workspace N, and hidden where there is none.
 - `SELECTED` is true for the workspace each display shows.
 - `space_change` reports each display's Paneru workspace number.
-- `space_windows_change` reports the apps on each Paneru workspace, in strip
-  order. Its `INFO` adds a `display` key, because every display has its own
-  workspace 1:
+- `space_windows_change` reports the apps tiled on each Paneru workspace, in
+  strip order. Floating windows stay on screen across workspaces, so they
+  count toward none. Its `INFO` adds a `display` key, because every display
+  has its own workspace 1:
   `{"space": 2, "display": 1, "apps": {"Safari": 1, "Terminal": 2}}`.
 
 Paneru's own events reach scripts as `paneru_<event>`, with the event's JSON

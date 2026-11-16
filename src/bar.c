@@ -446,6 +446,13 @@ void bar_calculate_bounds(struct bar* bar) {
   }
 }
 
+// Only a bar above the menu bar (topmost=on) may cover it. At the window
+// level the menu bar draws over the bar, so the bar has to sit below it.
+static bool bar_covers_menu_bar(void) {
+  return g_bar_manager.topmost
+         && g_bar_manager.window_level > kCGMainMenuWindowLevel;
+}
+
 static CGRect bar_get_frame(struct bar *bar) {
   bool has_notch = workspace_display_notch_height(bar->did) > 0;
   int notch_offset = has_notch ? g_bar_manager.notch_offset : 0;
@@ -469,7 +476,7 @@ static CGRect bar_get_frame(struct bar *bar) {
 
     origin.y += g_bar_manager.background.y_offset;
 
-    if (display_menu_bar_visible() && !g_bar_manager.topmost) {
+    if (display_menu_bar_visible() && !bar_covers_menu_bar()) {
       CGRect menu = display_menu_bar_rect(bar->did);
       origin.y += menu.size.height;
       bounds.size.height -= menu.size.height;
@@ -489,7 +496,7 @@ static CGRect bar_get_frame(struct bar *bar) {
       origin.y = CGRectGetMaxY(bounds)
                  - g_bar_manager.background.bounds.size.height
                  - 2*(g_bar_manager.background.y_offset) - notch_offset;
-    } else if (display_menu_bar_visible() && !g_bar_manager.topmost) {
+    } else if (display_menu_bar_visible() && !bar_covers_menu_bar()) {
       CGRect menu = display_menu_bar_rect(bar->did);
       origin.y += menu.size.height;
     }

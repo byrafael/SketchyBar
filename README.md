@@ -88,7 +88,9 @@ With `workspace_source=paneru`:
 
 - `associated_space=N` (or `space=N`) means Paneru workspace N on the
   display's current macOS Space. A space item is drawn on every display that
-  has a workspace N, and hidden where there is none.
+  has a workspace N with a tiled window, or shows workspace N. Paneru keeps
+  empty workspace numbers, and floating windows belong to no workspace, so an
+  empty workspace is hidden until you switch to it.
 - `SELECTED` is true for the workspace each display shows.
 - `space_change` reports each display's Paneru workspace number.
 - `space_windows_change` reports the apps tiled on each Paneru workspace, in

@@ -25,7 +25,8 @@ bool paneru_enabled(void);
 // Paneru reports none.
 uint32_t paneru_selected_workspace(uint64_t dsid);
 
-// Whether Paneru has workspace `number` on the native Space `dsid`.
+// Whether workspace `number` on the native Space `dsid` should be shown: Paneru
+// has it, and it holds a tiled window or is the one shown on that display.
 bool paneru_has_workspace(uint64_t dsid, uint32_t number);
 
 // Takes ownership of a state read by the background thread.

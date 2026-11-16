@@ -33,6 +33,9 @@ struct paneru_row {
   uint64_t native_id;
   bool active;
   bool selected;
+  // Whether any window is tiled on the row. Floating windows belong to no
+  // workspace, and Paneru keeps empty workspace numbers.
+  bool occupied;
   // The payload `space_windows_change` sends for this row, minus the
   // per-display fields. Compared to decide whether the row changed.
   char* apps_json;
@@ -166,6 +169,16 @@ static struct paneru_state* paneru_state_parse(NSData* data, uint64_t generation
       // Daemons before `selected` existed only report the active row.
       out->selected = json_bool(row[@"selected"], out->active);
       out->apps_json = paneru_apps_json(row[@"windows"]);
+      NSArray* windows = row[@"windows"];
+      if ([windows isKindOfClass:[NSArray class]]) {
+        for (id window in windows) {
+          if ([window isKindOfClass:[NSDictionary class]]
+              && !json_bool(window[@"floating"], false)) {
+            out->occupied = true;
+            break;
+          }
+        }
+      }
     }
     return state;
   }
@@ -525,8 +538,9 @@ uint32_t paneru_selected_workspace(uint64_t dsid) {
 bool paneru_has_workspace(uint64_t dsid, uint32_t number) {
   if (!g_state) return false;
   for (uint32_t i = 0; i < g_state->row_count; i++) {
-    if (g_state->rows[i].native_id == dsid && g_state->rows[i].number == number) {
-      return true;
+    struct paneru_row* row = &g_state->rows[i];
+    if (row->native_id == dsid && row->number == number) {
+      return row->occupied || row->selected || row->active;
     }
   }
   return false;

@@ -14,7 +14,17 @@ struct alias {
   char* name;
   char* owner;
 
+  // The process owning the mirrored menu bar item, found with its window.
   pid_t pid;
+
+  // macOS 26 and later draw all status items into one menu bar window, so an
+  // item has no window of its own. Such an item is found through
+  // Accessibility instead: `item_frame` is where it sits, `menubar` the window
+  // it is drawn into (0 while the item is hidden, e.g. behind the notch).
+  bool status_item;
+  CGRect item_frame;
+  uint32_t menubar;
+  CGRect menubar_frame;
 
   struct window window;
 
@@ -31,6 +41,7 @@ uint32_t alias_get_height(struct alias* alias);
 void alias_calculate_bounds(struct alias* alias, uint32_t x, uint32_t y);
 void alias_draw(struct alias* alias, CGContextRef context);
 bool alias_update(struct alias* alias, bool forced);
+bool alias_press(struct alias* alias);
 void alias_destroy(struct alias* alias);
 
 void print_all_menu_items(FILE* rsp);

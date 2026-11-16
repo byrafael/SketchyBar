@@ -10,3 +10,6 @@ float workspace_get_scale();
 
 CGImageRef workspace_icon_for_app(char* app);
 char* workspace_copy_app_name_for_pid(pid_t pid);
+pid_t workspace_pid_for_app_name(char* name);
+bool workspace_activate_app(pid_t pid);
+void workspace_print_status_items(FILE* rsp);

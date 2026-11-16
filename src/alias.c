@@ -2,10 +2,13 @@
 #include "misc/helpers.h"
 #include <CoreFoundation/CFBase.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <ApplicationServices/ApplicationServices.h>
+#include "workspace.h"
 
 struct menu_item {
   char* owner;
   char* name;
+  pid_t pid;
 
   float x_pos;
   uint32_t wid;
@@ -123,6 +126,7 @@ struct menu_item_list get_menu_item_list() {
     struct menu_item* menu_item = menu_item_list.menu_items + item_count++;
     menu_item->owner = owner_copy;
     menu_item->name = cfstring_copy(name_ref);
+    menu_item->pid = (pid_t)owner_pid;
     menu_item->x_pos = bounds.origin.x;
     menu_item->wid = wid;
     menu_item->layer = layer;
@@ -148,6 +152,10 @@ void print_all_menu_items(FILE* rsp) {
 
 #endif
   struct menu_item_list menu_item_list = get_menu_item_list();
+  if (menu_item_list.menu_item_count == 0) {
+    // macOS 26 and later: status items have no windows of their own.
+    workspace_print_status_items(rsp);
+  }
   if (menu_item_list.menu_item_count > 0) {
     fprintf(rsp, "[\n");
     int counter = 0;
@@ -189,6 +197,11 @@ void alias_init(struct alias* alias) {
   color_init(&alias->color, 0xffff0000);
   alias->update_frequency = 1;
   alias->counter = 0;
+  alias->pid = 0;
+  alias->status_item = false;
+  alias->menubar = 0;
+  alias->item_frame = CGRectNull;
+  alias->menubar_frame = CGRectNull;
 
   window_init(&alias->window);
   image_init(&alias->image);
@@ -212,6 +225,7 @@ static void alias_find_window(struct alias* alias) {
     }
 
     alias->window.id = item->wid;
+    alias->pid = item->pid;
     alias->window.frame.size = item->bounds.size;
     alias->window.origin = item->bounds.origin;
 
@@ -222,8 +236,218 @@ static void alias_find_window(struct alias* alias) {
   menu_item_list_clear(&menu_item_list);
 }
 
+static int compare_frames_by_x(const void* a, const void* b) {
+  const CGRect* lhs = a;
+  const CGRect* rhs = b;
+  // Hidden items (pushed off screen, e.g. behind the notch) sort last.
+  bool lhs_hidden = lhs->origin.x < 0;
+  bool rhs_hidden = rhs->origin.x < 0;
+  if (lhs_hidden != rhs_hidden) return lhs_hidden ? 1 : -1;
+  return (lhs->origin.x > rhs->origin.x) - (lhs->origin.x < rhs->origin.x);
+}
+
+// Finds the status item named by `owner,N` (the owner's N-th item from the
+// left, 1 when no N is given) through Accessibility, and the menu bar window
+// that draws it.
+static bool alias_find_status_item(struct alias* alias) {
+  alias->status_item = false;
+  alias->menubar = 0;
+  pid_t pid = workspace_pid_for_app_name(alias->owner);
+  if (pid <= 0) return false;
+
+  AXUIElementRef app = AXUIElementCreateApplication(pid);
+  if (!app) return false;
+  AXUIElementSetMessagingTimeout(app, 0.5);
+
+  CGRect frames[32];
+  int count = 0;
+  CFTypeRef extras = NULL;
+  if (AXUIElementCopyAttributeValue(app, CFSTR("AXExtrasMenuBar"), &extras)
+        == kAXErrorSuccess && extras) {
+    CFTypeRef children = NULL;
+    if (AXUIElementCopyAttributeValue(extras, kAXChildrenAttribute, &children)
+          == kAXErrorSuccess && children) {
+      CFIndex total = CFArrayGetCount(children);
+      for (CFIndex i = 0; i < total && count < 32; i++) {
+        AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+        CFTypeRef position_ref = NULL;
+        CFTypeRef size_ref = NULL;
+        CGPoint position = CGPointZero;
+        CGSize size = CGSizeZero;
+        if (AXUIElementCopyAttributeValue(child, kAXPositionAttribute, &position_ref)
+              == kAXErrorSuccess && position_ref) {
+          AXValueGetValue(position_ref, kAXValueTypeCGPoint, &position);
+          CFRelease(position_ref);
+        }
+        if (AXUIElementCopyAttributeValue(child, kAXSizeAttribute, &size_ref)
+              == kAXErrorSuccess && size_ref) {
+          AXValueGetValue(size_ref, kAXValueTypeCGSize, &size);
+          CFRelease(size_ref);
+        }
+        if (size.width > 0 && size.height > 0) {
+          frames[count++] = (CGRect){ position, size };
+        }
+      }
+      CFRelease(children);
+    }
+    CFRelease(extras);
+  }
+  CFRelease(app);
+  if (count == 0) return false;
+
+  qsort(frames, count, sizeof(CGRect), compare_frames_by_x);
+  long index = alias->name && alias->name[0] ? strtol(alias->name, NULL, 10) : 1;
+  if (index < 1) index = 1;
+  if (index > count) return false;
+
+  alias->status_item = true;
+  alias->pid = pid;
+  alias->item_frame = frames[index - 1];
+  alias->window.origin = alias->item_frame.origin;
+  alias->window.frame.size = alias->item_frame.size;
+
+  // The menu bar window covering the item's centre draws it. It is not
+  // reported as on screen, so every window is searched.
+  CGPoint center = { CGRectGetMidX(alias->item_frame),
+                     CGRectGetMidY(alias->item_frame) };
+  CFArrayRef windows = CGWindowListCopyWindowInfo(kCGWindowListOptionAll,
+                                                  kCGNullWindowID        );
+  if (!windows) return true;
+  for (CFIndex i = 0; i < CFArrayGetCount(windows); i++) {
+    CFDictionaryRef window = CFArrayGetValueAtIndex(windows, i);
+    CFNumberRef layer_ref = CFDictionaryGetValue(window, kCGWindowLayer);
+    CFStringRef owner_ref = CFDictionaryGetValue(window, kCGWindowOwnerName);
+    CFDictionaryRef bounds_ref = CFDictionaryGetValue(window, kCGWindowBounds);
+    CFNumberRef id_ref = CFDictionaryGetValue(window, kCGWindowNumber);
+    if (!layer_ref || !owner_ref || !bounds_ref || !id_ref) continue;
+
+    int layer = 0;
+    CFNumberGetValue(layer_ref, kCFNumberIntType, &layer);
+    if (layer != kCGMainMenuWindowLevel) continue;
+    if (CFStringCompare(owner_ref, CFSTR("MenuBarAgent"), 0) != kCFCompareEqualTo) continue;
+
+    CGRect bounds;
+    if (!CGRectMakeWithDictionaryRepresentation(bounds_ref, &bounds)) continue;
+    if (!CGRectContainsPoint(bounds, center)) continue;
+
+    uint32_t wid = 0;
+    CFNumberGetValue(id_ref, kCFNumberSInt32Type, &wid);
+    alias->menubar = wid;
+    alias->menubar_frame = bounds;
+    break;
+  }
+  CFRelease(windows);
+  return true;
+}
+
+// Crops the item out of the menu bar window it is drawn into. A hidden item
+// shows its app's icon instead.
+static bool alias_update_status_item(struct alias* alias, bool forced) {
+  if (!alias_find_status_item(alias)) {
+    image_destroy(&alias->image);
+    return false;
+  }
+
+  CGImageRef image_ref = NULL;
+  CGRect bounds = { CGPointZero, alias->item_frame.size };
+  if (alias->menubar) {
+    struct window menubar;
+    memset(&menubar, 0, sizeof(struct window));
+    menubar.id = alias->menubar;
+    bool disabled = false;
+    CGImageRef full = window_capture(&menubar, &disabled);
+    if (!full) return false;
+
+    CGFloat scale = CGImageGetWidth(full) / alias->menubar_frame.size.width;
+    CGRect crop = {
+      { (alias->item_frame.origin.x - alias->menubar_frame.origin.x) * scale,
+        (alias->item_frame.origin.y - alias->menubar_frame.origin.y) * scale },
+      { alias->item_frame.size.width * scale,
+        alias->item_frame.size.height * scale }
+    };
+    image_ref = CGImageCreateWithImageInRect(full, crop);
+    CGImageRelease(full);
+  } else {
+    image_ref = workspace_icon_for_app(alias->owner);
+    bounds.size = (CGSize){ 20, 20 };
+  }
+  if (!image_ref) return false;
+
+  return image_set_image(&alias->image, image_ref, bounds, forced);
+}
+
+// Clicks the menu bar item this alias mirrors, so its menu opens as if the
+// item itself were clicked. Among the owner's status items, the one closest to
+// the mirrored window's position is pressed. Needs Accessibility permission.
+bool alias_press(struct alias* alias) {
+  if (alias->status_item) alias_find_status_item(alias);
+  else alias_find_window(alias);
+  if ((!alias->window.id && !alias->status_item) || alias->pid <= 0) return false;
+
+  // macOS has nowhere to open the menu of an item hidden behind the notch:
+  // bring its app forward instead.
+  if (alias->status_item && !alias->menubar) return workspace_activate_app(alias->pid);
+
+  if (!AXIsProcessTrusted()) {
+    printf("[!] Alias: clicking '%s' needs Accessibility permission\n",
+           alias->owner ? alias->owner : "");
+    return false;
+  }
+
+  AXUIElementRef app = AXUIElementCreateApplication(alias->pid);
+  if (!app) return false;
+  // The press only returns once the app's menu closes, and the menu only
+  // opens once the press returns, so it must time out quickly. A short timeout
+  // also keeps a hung app from stalling the bar.
+  AXUIElementSetMessagingTimeout(app, 0.1);
+
+  bool pressed = false;
+  CFTypeRef extras = NULL;
+  if (AXUIElementCopyAttributeValue(app, CFSTR("AXExtrasMenuBar"), &extras)
+        == kAXErrorSuccess && extras) {
+    CFTypeRef children = NULL;
+    if (AXUIElementCopyAttributeValue(extras, kAXChildrenAttribute, &children)
+          == kAXErrorSuccess && children) {
+      AXUIElementRef target = NULL;
+      CGFloat best = CGFLOAT_MAX;
+      CFIndex count = CFArrayGetCount(children);
+      for (CFIndex i = 0; i < count; i++) {
+        AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+        CFTypeRef value = NULL;
+        CGPoint position = CGPointZero;
+        if (AXUIElementCopyAttributeValue(child, kAXPositionAttribute, &value)
+              != kAXErrorSuccess || !value) {
+          if (count == 1) target = child;
+          continue;
+        }
+        AXValueGetValue(value, kAXValueTypeCGPoint, &position);
+        CFRelease(value);
+
+        CGFloat distance = fabs(position.x - alias->window.origin.x)
+                           + fabs(position.y - alias->window.origin.y);
+        if (distance < best) {
+          best = distance;
+          target = child;
+        }
+      }
+      if (target) {
+        pressed = AXUIElementPerformAction(target, kAXPressAction)
+                  == kAXErrorSuccess;
+      }
+      CFRelease(children);
+    }
+    CFRelease(extras);
+  }
+  CFRelease(app);
+  return pressed;
+}
+
 static bool alias_update_image(struct alias* alias, bool forced) {
+  if (alias->status_item) return alias_update_status_item(alias, forced);
   if (alias->window.id == 0) alias_find_window(alias);
+  if (alias->window.id == 0 && alias_find_status_item(alias)) {
+    return alias_update_status_item(alias, forced);
+  }
   if (alias->window.id == 0) return false;
 
   bool disabled = false;

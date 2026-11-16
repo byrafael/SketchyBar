@@ -5,6 +5,12 @@
 #
 # The previous binary is kept at ~/.local/bin/sketchybar.previous for rollback.
 #
+# macOS keys Screen Recording and Accessibility grants (needed by alias items)
+# to the code signature. An ad-hoc signature changes on every build, which
+# drops both grants, so builds are signed with one stable self-signed identity:
+# $SKETCHYBAR_SIGNING_IDENTITY, by default the one Paneru's install-local.sh
+# creates. Without it the build is signed ad hoc and the grants reset.
+#
 # Usage: ./install-local.sh [--no-restart]
 
 set -euo pipefail
@@ -14,6 +20,7 @@ readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly TARGET="${HOME}/.local/bin/sketchybar"
 readonly PLIST="${HOME}/Library/LaunchAgents/${SERVICE}.plist"
 readonly DOMAIN="gui/$(id -u)"
+readonly IDENTITY="${SKETCHYBAR_SIGNING_IDENTITY:-Paneru Local Builds}"
 
 log() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -91,7 +98,13 @@ main() {
   log "installing to ${TARGET}"
   # Replace rather than overwrite, so a running bar keeps its own inode.
   cp "${built}" "${TARGET}.new"
-  codesign --force --sign - "${TARGET}.new" >/dev/null 2>&1
+  if security find-identity -v -p codesigning | grep -qF "\"${IDENTITY}\""; then
+    log "signing as '${IDENTITY}'"
+    codesign --force --identifier com.felixkratz.sketchybar --sign "${IDENTITY}" "${TARGET}.new"
+  else
+    log "no '${IDENTITY}' identity: signing ad hoc; Screen Recording and Accessibility grants will reset"
+    codesign --force --identifier com.felixkratz.sketchybar --sign - "${TARGET}.new" >/dev/null 2>&1
+  fi
   mv -f "${TARGET}.new" "${TARGET}"
 
   local plist_changed=0

@@ -203,7 +203,8 @@ bool mach_server_begin(struct mach_server* mach_server, mach_handler handler) {
                                                             cf_mach_port,
                                                             0            );
 
-  CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopDefaultMode);
+  // Common modes keep the bar answering while a menu it shows is open.
+  CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
   CFRelease(source);
   CFRelease(cf_mach_port);
   return true;

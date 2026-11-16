@@ -134,9 +134,15 @@ sketchybar --add alias "Wispr Flow,1" right
 `<app>,<n>` is the app's n-th icon from the left. The icon is cropped live from
 the menu bar. An icon hidden behind the notch shows its app's icon instead.
 
-Clicking an alias without a `click_script` clicks the icon it mirrors, so its
-menu opens. A hidden icon's app is brought forward instead, since macOS has
-nowhere to open its menu.
+Clicking an alias without a `click_script` opens what the icon opens, under
+the alias rather than in the menu bar:
+
+* An icon with a menu shows a copy of it, read through Accessibility.
+  Choosing an entry chooses the app's own menu item. This works for icons
+  hidden behind the notch too.
+* Any other icon is clicked, and the panel it opens is moved under the alias.
+  A hidden icon's app is brought forward instead, since macOS has nowhere to
+  open its panel.
 
 This needs Screen Recording and Accessibility permission for the `sketchybar`
 binary. macOS ties both to the code signature, so `install-local.sh` signs with

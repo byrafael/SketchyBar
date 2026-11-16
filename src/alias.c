@@ -4,6 +4,7 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <ApplicationServices/ApplicationServices.h>
 #include "workspace.h"
+#include "alias_menu.h"
 
 struct menu_item {
   char* owner;
@@ -376,39 +377,20 @@ static bool alias_update_status_item(struct alias* alias, bool forced) {
   return image_set_image(&alias->image, image_ref, bounds, forced);
 }
 
-// Clicks the menu bar item this alias mirrors, so its menu opens as if the
-// item itself were clicked. Among the owner's status items, the one closest to
-// the mirrored window's position is pressed. Needs Accessibility permission.
-bool alias_press(struct alias* alias) {
-  if (alias->status_item) alias_find_status_item(alias);
-  else alias_find_window(alias);
-  if ((!alias->window.id && !alias->status_item) || alias->pid <= 0) return false;
-
-  // macOS has nowhere to open the menu of an item hidden behind the notch:
-  // bring its app forward instead.
-  if (alias->status_item && !alias->menubar) return workspace_activate_app(alias->pid);
-
-  if (!AXIsProcessTrusted()) {
-    printf("[!] Alias: clicking '%s' needs Accessibility permission\n",
-           alias->owner ? alias->owner : "");
-    return false;
-  }
-
+// The status item this alias mirrors, retained: among its owner's status
+// items, the one closest to the mirrored position.
+static AXUIElementRef alias_copy_ax_item(struct alias* alias) {
   AXUIElementRef app = AXUIElementCreateApplication(alias->pid);
-  if (!app) return false;
-  // The press only returns once the app's menu closes, and the menu only
-  // opens once the press returns, so it must time out quickly. A short timeout
-  // also keeps a hung app from stalling the bar.
-  AXUIElementSetMessagingTimeout(app, 0.1);
+  if (!app) return NULL;
+  AXUIElementSetMessagingTimeout(app, 0.5);
 
-  bool pressed = false;
+  AXUIElementRef target = NULL;
   CFTypeRef extras = NULL;
   if (AXUIElementCopyAttributeValue(app, CFSTR("AXExtrasMenuBar"), &extras)
         == kAXErrorSuccess && extras) {
     CFTypeRef children = NULL;
     if (AXUIElementCopyAttributeValue(extras, kAXChildrenAttribute, &children)
           == kAXErrorSuccess && children) {
-      AXUIElementRef target = NULL;
       CGFloat best = CGFLOAT_MAX;
       CFIndex count = CFArrayGetCount(children);
       for (CFIndex i = 0; i < count; i++) {
@@ -430,16 +412,82 @@ bool alias_press(struct alias* alias) {
           target = child;
         }
       }
-      if (target) {
-        pressed = AXUIElementPerformAction(target, kAXPressAction)
-                  == kAXErrorSuccess;
-      }
+      if (target) CFRetain(target);
       CFRelease(children);
     }
     CFRelease(extras);
   }
   CFRelease(app);
-  return pressed;
+  return target;
+}
+
+static AXUIElementRef alias_copy_ax_menu(AXUIElementRef item) {
+  CFTypeRef children = NULL;
+  if (AXUIElementCopyAttributeValue(item, kAXChildrenAttribute, &children)
+        != kAXErrorSuccess || !children) {
+    return NULL;
+  }
+  AXUIElementRef menu = NULL;
+  for (CFIndex i = 0; i < CFArrayGetCount(children) && !menu; i++) {
+    AXUIElementRef child = (AXUIElementRef)CFArrayGetValueAtIndex(children, i);
+    CFTypeRef role = NULL;
+    if (AXUIElementCopyAttributeValue(child, kAXRoleAttribute, &role)
+          == kAXErrorSuccess && role) {
+      if (CFEqual(role, kAXMenuRole)) menu = (AXUIElementRef)CFRetain(child);
+      CFRelease(role);
+    }
+  }
+  CFRelease(children);
+  return menu;
+}
+
+// Clicks the menu bar item this alias mirrors, and opens what it opens under
+// `anchor`, the alias on screen. An item with a menu shows a copy of that menu
+// there; any other item is pressed, and the panel it opens is moved there.
+// Needs Accessibility permission.
+bool alias_press(struct alias* alias, CGRect anchor) {
+  if (alias->status_item) alias_find_status_item(alias);
+  else alias_find_window(alias);
+  if ((!alias->window.id && !alias->status_item) || alias->pid <= 0) return false;
+
+  bool hidden = alias->status_item && !alias->menubar;
+  if (!AXIsProcessTrusted()) {
+    printf("[!] Alias: clicking '%s' needs Accessibility permission\n",
+           alias->owner ? alias->owner : "");
+    return hidden && workspace_activate_app(alias->pid);
+  }
+
+  AXUIElementRef item = alias_copy_ax_item(alias);
+  if (!item) return hidden && workspace_activate_app(alias->pid);
+
+  // A menu can be read without opening it, so it works even for an item
+  // hidden behind the notch.
+  bool opened = false;
+  AXUIElementRef menu = alias_copy_ax_menu(item);
+  if (menu) {
+    opened = alias_menu_show(menu, anchor);
+    CFRelease(menu);
+  }
+
+  if (!opened && hidden) {
+    // macOS has nowhere to open anything else for a hidden item: bring its
+    // app forward instead.
+    opened = workspace_activate_app(alias->pid);
+  } else if (!opened) {
+    alias_menu_follow_window(alias->pid, alias->window.frame.size.width > 0
+                                         ? (CGRect){ alias->window.origin,
+                                                     alias->window.frame.size }
+                                         : anchor,
+                             anchor);
+    // The press only returns once whatever it opens closes, and that only
+    // opens once the press returns, so it must time out quickly. A short
+    // timeout also keeps a hung app from stalling the bar.
+    AXUIElementSetMessagingTimeout(item, 0.1);
+    AXError error = AXUIElementPerformAction(item, kAXPressAction);
+    opened = error == kAXErrorSuccess || error == kAXErrorCannotComplete;
+  }
+  CFRelease(item);
+  return opened;
 }
 
 static bool alias_update_image(struct alias* alias, bool forced) {

@@ -278,27 +278,46 @@ static bool paneru_refresh(char* binary, uint64_t generation) {
   return true;
 }
 
-// How soon after a subscription line the rows should be read again, or -1
-// when the line cannot change them. A workspace switch is shown at once.
-// Window list changes arrive in bursts during an animation, so they wait a
-// moment and share one read. Moves, resizes, focus and titles never change
-// which apps a row holds.
-static int paneru_line_delay_ms(char* line, size_t length) {
+struct paneru_forward {
+  uint64_t generation;
+  char* name;
+  char* info;
+};
+
+// Hands one subscription line to bar items subscribed to `paneru_<event>`.
+static void paneru_forward_line(char* event, char* line, size_t length,
+                                uint64_t generation) {
+  struct paneru_forward* forward = malloc(sizeof(struct paneru_forward));
+  forward->generation = generation;
+  size_t name_length = strlen(event) + sizeof("paneru_");
+  forward->name = malloc(name_length);
+  snprintf(forward->name, name_length, "paneru_%s", event);
+  forward->info = malloc(length + 1);
+  memcpy(forward->info, line, length);
+  forward->info[length] = '\0';
+
+  struct event post = { forward, PANERU_EVENT };
+  event_post(&post);
+}
+
+// Forwards one subscription line to the bar and returns how soon the rows
+// should be read again, or -1 when the line cannot change them. A workspace
+// switch is shown at once. Window list changes arrive in bursts during an
+// animation, so they wait a moment and share one read. Focus and titles never
+// change which apps a row holds.
+static int paneru_handle_line(char* line, size_t length, uint64_t generation) {
   static const struct { char* name; int delay_ms; } events[] = {
     { "virtual_workspace_changed", 0 },
     { "display_changed", 0 },
     { "windows_changed", PANERU_COALESCE_MS },
+    { "window_focused", -1 },
+    { "window_title_changed", -1 },
   };
 
-  // Most lines are frame updates; skip parsing those.
-  bool candidate = false;
-  for (int i = 0; i < sizeof(events) / sizeof(*events); i++) {
-    if (memmem(line, length, events[i].name, strlen(events[i].name))) {
-      candidate = true;
-      break;
-    }
-  }
-  if (!candidate) return -1;
+  // Frame updates arrive every few milliseconds while windows move. Nothing
+  // here needs them, so they are neither parsed nor forwarded.
+  static const char on_screen[] = "\"on_screen_changed\"";
+  if (memmem(line, length, on_screen, sizeof(on_screen) - 1)) return -1;
 
   @autoreleasepool {
     NSData* data = [NSData dataWithBytesNoCopy:line length:length freeWhenDone:NO];
@@ -307,7 +326,9 @@ static int paneru_line_delay_ms(char* line, size_t length) {
     id event = root[@"event"];
     if (![event isKindOfClass:[NSString class]]) return -1;
     for (int i = 0; i < sizeof(events) / sizeof(*events); i++) {
-      if (strcmp([event UTF8String], events[i].name) == 0) return events[i].delay_ms;
+      if (strcmp([event UTF8String], events[i].name) != 0) continue;
+      paneru_forward_line(events[i].name, line, length, generation);
+      return events[i].delay_ms;
     }
     return -1;
   }
@@ -323,6 +344,7 @@ struct line_reader {
   size_t capacity;
   // When the rows must be read again, or -1 when nothing asked for it.
   int64_t refresh_at_ms;
+  uint64_t generation;
 };
 
 // Reads what is available on `fd` and moves the refresh deadline forward for
@@ -344,7 +366,8 @@ static bool paneru_read_lines(int fd, struct line_reader* reader) {
   for (size_t i = 0; i < reader->length; i++) {
     if (reader->buffer[i] != '\n') continue;
     int delay_ms = i > start
-                   ? paneru_line_delay_ms(reader->buffer + start, i - start)
+                   ? paneru_handle_line(reader->buffer + start, i - start,
+                                        reader->generation)
                    : -1;
     if (delay_ms >= 0) {
       int64_t at = paneru_now_ms() + delay_ms;
@@ -376,7 +399,8 @@ static bool paneru_follow(char* binary, uint64_t generation) {
   if (!current) kill(pid, SIGTERM);
   else {
     // Subscribe first, then read, so a change between the two is not lost.
-    struct line_reader reader = { .refresh_at_ms = paneru_now_ms() };
+    struct line_reader reader = { .refresh_at_ms = paneru_now_ms(),
+                                  .generation = generation };
     for (;;) {
       int timeout_ms = -1;
       if (reader.refresh_at_ms >= 0) {
@@ -515,6 +539,19 @@ void paneru_handle_state(struct paneru_state* state) {
   bar_manager_handle_space_change(&g_bar_manager, false);
 }
 
+void paneru_handle_event(struct paneru_forward* forward) {
+  if (paneru_enabled() && forward->generation == paneru_current_generation()) {
+    struct env_vars env_vars;
+    env_vars_init(&env_vars);
+    env_vars_set(&env_vars, string_copy("INFO"), string_copy(forward->info));
+    bar_manager_custom_events_trigger(&g_bar_manager, forward->name, &env_vars);
+    env_vars_destroy(&env_vars);
+  }
+  free(forward->name);
+  free(forward->info);
+  free(forward);
+}
+
 static struct paneru_sent* paneru_sent_find(uint32_t adid, uint32_t number) {
   for (uint32_t i = 0; i < g_sent_count; i++) {
     if (g_sent[i].adid == adid && g_sent[i].number == number) return &g_sent[i];
@@ -522,8 +559,27 @@ static struct paneru_sent* paneru_sent_find(uint32_t adid, uint32_t number) {
   return NULL;
 }
 
+// The same keys as the native event, plus the display, because each display
+// has its own workspace 1.
+static void paneru_send_space_windows(uint32_t number, uint32_t adid, char* apps_json) {
+  size_t length = strlen(apps_json) + 96;
+  char payload[length];
+  snprintf(payload, length, "{\n"
+                            "\t\"space\": %u,\n"
+                            "\t\"display\": %u,\n"
+                            "\t\"apps\": %s\n"
+                            "}\n",
+                            number,
+                            adid,
+                            apps_json             );
+  bar_manager_handle_space_windows_change(&g_bar_manager, payload);
+}
+
 void paneru_post_space_windows(bool forced) {
   if (!g_state) return;
+
+  bool seen[g_sent_count + g_state->row_count * g_bar_manager.bar_count + 1];
+  memset(seen, 0, sizeof(seen));
 
   for (uint32_t b = 0; b < g_bar_manager.bar_count; b++) {
     struct bar* bar = g_bar_manager.bars[b];
@@ -535,8 +591,6 @@ void paneru_post_space_windows(bool forced) {
       bool changed = !sent
                      || sent->native_id != row->native_id
                      || strcmp(sent->apps_json, row->apps_json) != 0;
-      if (!changed && !forced) continue;
-
       if (!sent) {
         g_sent = realloc(g_sent, sizeof(struct paneru_sent) * ++g_sent_count);
         sent = &g_sent[g_sent_count - 1];
@@ -544,23 +598,26 @@ void paneru_post_space_windows(bool forced) {
         sent->number = row->number;
         sent->apps_json = NULL;
       }
+      seen[sent - g_sent] = true;
+      if (!changed && !forced) continue;
+
       sent->native_id = row->native_id;
       free(sent->apps_json);
       sent->apps_json = string_copy(row->apps_json);
-
-      // The same keys as the native event, plus the display, because each
-      // display has its own workspace 1.
-      size_t length = strlen(row->apps_json) + 96;
-      char payload[length];
-      snprintf(payload, length, "{\n"
-                                "\t\"space\": %u,\n"
-                                "\t\"display\": %u,\n"
-                                "\t\"apps\": %s\n"
-                                "}\n",
-                                row->number,
-                                bar->adid,
-                                row->apps_json        );
-      bar_manager_handle_space_windows_change(&g_bar_manager, payload);
+      paneru_send_space_windows(row->number, bar->adid, row->apps_json);
     }
   }
+
+  // A workspace that is gone (reaped, or Paneru stopped) has no windows:
+  // say so once, so items showing its apps can clear them.
+  uint32_t kept = 0;
+  for (uint32_t i = 0; i < g_sent_count; i++) {
+    if (seen[i]) {
+      g_sent[kept++] = g_sent[i];
+      continue;
+    }
+    paneru_send_space_windows(g_sent[i].number, g_sent[i].adid, "{}");
+    free(g_sent[i].apps_json);
+  }
+  g_sent_count = kept;
 }

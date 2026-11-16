@@ -286,8 +286,9 @@ static void handle_domain_add(FILE* rsp, struct token domain, char* message) {
           }
           free(bar_items);
         } else if (first) {
+          // The item is freed here; nothing below may touch it.
           bar_manager_remove_item(&g_bar_manager, bar_item);
-          break;
+          return;
         }
         member = get_token(&message);
       }

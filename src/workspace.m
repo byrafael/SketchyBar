@@ -84,10 +84,35 @@ char* workspace_copy_app_name_for_pid(pid_t pid) {
   }
 }
 
+// An installed app bundle named exactly `name`. Web-app runtimes (Firefox PWA,
+// Chrome apps) run every site under one shared bundle identifier, so the
+// running app only knows the runtime's icon; each site's launcher bundle in
+// ~/Applications carries its own.
+static NSURL* workspace_installed_app_named(NSString* name) {
+  if ([name length] == 0 || [name containsString:@"/"]) return nil;
+
+  NSString* bundle = [name stringByAppendingString:@".app"];
+  NSArray* directories = @[
+    [NSHomeDirectory() stringByAppendingPathComponent:@"Applications"],
+    [NSHomeDirectory() stringByAppendingPathComponent:@"Applications/Chrome Apps.localized"],
+    @"/Applications",
+    @"/Applications/Utilities",
+    @"/System/Applications",
+    @"/System/Applications/Utilities",
+  ];
+  NSFileManager* files = [NSFileManager defaultManager];
+  for (NSString* directory in directories) {
+    NSString* path = [directory stringByAppendingPathComponent:bundle];
+    if ([files fileExistsAtPath:path]) return [NSURL fileURLWithPath:path];
+  }
+  return nil;
+}
+
 CGImageRef workspace_icon_for_app(char* app) {
   @autoreleasepool {
     NSString* ns_app = [NSString stringWithUTF8String:app];
     NSURL* path = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:ns_app];
+    if (!path) path = workspace_installed_app_named(ns_app);
     if (!path) {
       bool recovered = false;
       NSArray* running_apps = [[NSWorkspace sharedWorkspace] runningApplications];

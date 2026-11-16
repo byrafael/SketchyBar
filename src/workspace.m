@@ -259,6 +259,10 @@ CGImageRef workspace_icon_for_app(char* app) {
         info[[data length]] = '\0';
         notification->info = info;
       }
+    } else if ([note.object isKindOfClass:[NSString class]]) {
+      // Some apps send their payload as the notification's object instead,
+      // e.g. BetterDisplay's OSD notifications carry JSON there.
+      notification->info = string_copy((char*)[note.object UTF8String]);
     }
 
     struct event event = { notification, DISTRIBUTED_NOTIFICATION };

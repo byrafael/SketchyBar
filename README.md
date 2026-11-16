@@ -134,6 +134,15 @@ sketchybar --add alias "Wispr Flow,1" right
 `<app>,<n>` is the app's n-th icon from the left. The icon is cropped live from
 the menu bar. An icon hidden behind the notch shows its app's icon instead.
 
+macOS reserves blank space around some icons, which leaves uneven gaps between
+aliases. `alias.trim=on` crops an alias to the columns its icon draws in. The
+crop never shrinks, so the alias keeps a steady width as the icon's content
+changes:
+
+```bash
+sketchybar --set "Stats,1" alias.trim=on
+```
+
 Clicking an alias without a `click_script` opens what the icon opens, under
 the alias rather than in the menu bar:
 
@@ -148,6 +157,19 @@ This needs Screen Recording and Accessibility permission for the `sketchybar`
 binary. macOS ties both to the code signature, so `install-local.sh` signs with
 a stable identity. Clicks only reach the bar above the backstop level:
 use `topmost=window` when windows never cover the bar.
+
+## Notifications that carry their payload as text
+
+A custom event tied to a distributed notification passes the notification's
+`userInfo` as `$INFO`. Some apps put their payload in the notification's
+`object` string instead; `$INFO` then holds that string. For example,
+BetterDisplay's OSD notifications (with Settings > Application > Integration >
+Dispatch OSD notifications on) arrive as JSON:
+
+```bash
+sketchybar --add event display_osd pro.betterdisplay.BetterDisplay.osd
+# $INFO: {"controlTarget":"combinedBrightness","value":60,"maxValue":64,...}
+```
 
 ## Documentation
 For the full documentation of all commands and properties please refer to the [website](https://felixkratz.github.io/SketchyBar/config/bar).

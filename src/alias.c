@@ -203,6 +203,10 @@ void alias_init(struct alias* alias) {
   alias->menubar = 0;
   alias->item_frame = CGRectNull;
   alias->menubar_frame = CGRectNull;
+  alias->trim = false;
+  alias->trim_left = -1;
+  alias->trim_right = -1;
+  alias->trim_size = CGSizeZero;
 
   window_init(&alias->window);
   image_init(&alias->image);
@@ -341,6 +345,58 @@ static bool alias_find_status_item(struct alias* alias) {
   return true;
 }
 
+// Crops `image` to the columns any update has drawn in so far. Returns the
+// cropped image, retained, and releases `image`.
+static CGImageRef alias_trim(struct alias* alias, CGImageRef image) {
+  size_t width = CGImageGetWidth(image);
+  size_t height = CGImageGetHeight(image);
+  if (width == 0 || height == 0) return image;
+
+  uint8_t* pixels = calloc(width * height, 4);
+  if (!pixels) return image;
+  CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+  CGContextRef context = CGBitmapContextCreate(pixels, width, height, 8,
+                                               width * 4, space,
+                                               kCGImageAlphaPremultipliedLast);
+  CGColorSpaceRelease(space);
+  if (!context) {
+    free(pixels);
+    return image;
+  }
+  CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
+  CGContextRelease(context);
+
+  int left = -1, right = -1;
+  for (size_t x = 0; x < width; x++) {
+    for (size_t y = 0; y < height; y++) {
+      if (pixels[(y * width + x) * 4 + 3] > 16) {
+        if (left < 0) left = x;
+        right = x;
+        break;
+      }
+    }
+  }
+  free(pixels);
+  if (left < 0) return image;
+
+  CGSize size = { width, height };
+  if (!CGSizeEqualToSize(size, alias->trim_size)) {
+    alias->trim_size = size;
+    alias->trim_left = left;
+    alias->trim_right = right;
+  } else {
+    if (left < alias->trim_left) alias->trim_left = left;
+    if (right > alias->trim_right) alias->trim_right = right;
+  }
+
+  CGRect crop = CGRectMake(alias->trim_left, 0,
+                           alias->trim_right - alias->trim_left + 1, height);
+  CGImageRef trimmed = CGImageCreateWithImageInRect(image, crop);
+  if (!trimmed) return image;
+  CGImageRelease(image);
+  return trimmed;
+}
+
 // Crops the item out of the menu bar window it is drawn into. A hidden item
 // shows its app's icon instead.
 static bool alias_update_status_item(struct alias* alias, bool forced) {
@@ -368,6 +424,10 @@ static bool alias_update_status_item(struct alias* alias, bool forced) {
     };
     image_ref = CGImageCreateWithImageInRect(full, crop);
     CGImageRelease(full);
+    if (image_ref && alias->trim) {
+      image_ref = alias_trim(alias, image_ref);
+      bounds.size.width = CGImageGetWidth(image_ref) / scale;
+    }
   } else {
     image_ref = workspace_icon_for_app(alias->owner);
     bounds.size = (CGSize){ 20, 20 };
@@ -605,6 +665,10 @@ bool alias_parse_sub_domain(struct alias* alias, FILE* rsp, struct token propert
   } else if (token_equals(property, PROPERTY_UPDATE_FREQ)) {
     alias->update_frequency = token_to_uint32t(get_token(&message));
     return false;
+  } else if (token_equals(property, PROPERTY_TRIM)) {
+    alias->trim = evaluate_boolean_state(get_token(&message), alias->trim);
+    alias->trim_size = CGSizeZero;
+    return alias_update(alias, true);
   } else {
     respond(rsp, "[!] Alias: Invalid property '%s' \n", property.text);
   }

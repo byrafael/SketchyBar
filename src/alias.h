@@ -26,6 +26,16 @@ struct alias {
   uint32_t menubar;
   CGRect menubar_frame;
 
+  // With `trim` on, a status item is cropped to the columns it draws in,
+  // dropping the empty space macOS reserves around it. The crop only grows,
+  // so the alias keeps its width as the item's content changes:
+  // `trim_left` and `trim_right` are the outermost columns seen, in pixels of
+  // an item `trim_size` large.
+  bool trim;
+  int trim_left;
+  int trim_right;
+  CGSize trim_size;
+
   struct window window;
 
   bool color_override;

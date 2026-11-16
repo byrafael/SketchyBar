@@ -89,6 +89,7 @@
 #define PROPERTY_ASSOCIATED_DISPLAY            "associated_display"
 #define PROPERTY_ASSOCIATED_SPACE              "associated_space"
 #define PROPERTY_UPDATE_FREQ                   "update_freq"
+#define PROPERTY_TRIM                          "trim"
 #define PROPERTY_SCRIPT                        "script"
 #define PROPERTY_CLICK_SCRIPT                  "click_script"
 #define PROPERTY_ICON                          "icon"

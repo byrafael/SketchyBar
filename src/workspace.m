@@ -108,6 +108,63 @@ static NSURL* workspace_installed_app_named(NSString* name) {
   return nil;
 }
 
+pid_t workspace_pid_for_app_name(char* name) {
+  if (!name) return 0;
+  @autoreleasepool {
+    NSString* ns_name = [NSString stringWithUTF8String:name];
+    for (NSRunningApplication* app in [[NSWorkspace sharedWorkspace] runningApplications]) {
+      if ([[app localizedName] isEqualToString:ns_name]) return [app processIdentifier];
+    }
+  }
+  return 0;
+}
+
+bool workspace_activate_app(pid_t pid) {
+  @autoreleasepool {
+    NSRunningApplication* app
+      = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    return app && [app activateWithOptions:NSApplicationActivateAllWindows];
+  }
+}
+
+// Lists every app's status items as "Owner,N", N counting from the left, for
+// `--query default_menu_items` where status items have no windows (macOS 26+).
+void workspace_print_status_items(FILE* rsp) {
+  @autoreleasepool {
+    bool first = true;
+    fprintf(rsp, "[\n");
+    for (NSRunningApplication* app in [[NSWorkspace sharedWorkspace] runningApplications]) {
+      NSString* name = [app localizedName];
+      // Background-only processes own no status items, and asking each of
+      // them would outlast the client's 100ms wait for an answer.
+      if (!name || [app activationPolicy] == NSApplicationActivationPolicyProhibited) continue;
+      AXUIElementRef element = AXUIElementCreateApplication([app processIdentifier]);
+      if (!element) continue;
+      AXUIElementSetMessagingTimeout(element, 0.05);
+
+      CFTypeRef extras = NULL;
+      CFIndex count = 0;
+      if (AXUIElementCopyAttributeValue(element, CFSTR("AXExtrasMenuBar"), &extras)
+            == kAXErrorSuccess && extras) {
+        CFTypeRef children = NULL;
+        if (AXUIElementCopyAttributeValue(extras, kAXChildrenAttribute, &children)
+              == kAXErrorSuccess && children) {
+          count = CFArrayGetCount(children);
+          CFRelease(children);
+        }
+        CFRelease(extras);
+      }
+      CFRelease(element);
+
+      for (CFIndex i = 1; i <= count; i++) {
+        fprintf(rsp, "%s\t\"%s,%ld\"", first ? "" : ",\n", [name UTF8String], (long)i);
+        first = false;
+      }
+    }
+    fprintf(rsp, "\n]\n");
+  }
+}
+
 CGImageRef workspace_icon_for_app(char* app) {
   @autoreleasepool {
     NSString* ns_app = [NSString stringWithUTF8String:app];

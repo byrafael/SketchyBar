@@ -239,6 +239,12 @@ void bar_item_on_click(struct bar_item* bar_item, uint32_t type, uint32_t mouse_
     }
   }
 
+  // Without a click script of its own, an alias clicks the item it mirrors.
+  if (bar_item->has_alias
+      && (!bar_item->click_script || strlen(bar_item->click_script) == 0)) {
+    alias_press(&bar_item->alias);
+  }
+
   if (bar_item->click_script && strlen(bar_item->click_script) > 0) {
     for (int i = 0; i < bar_item->signal_args.env_vars.count; i++) {
       env_vars_set(&env_vars,

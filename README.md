@@ -120,6 +120,29 @@ workspace rows change. It finds `paneru` on `PATH`, then in `~/.cargo/bin`,
 workspace is shown, and the bar reconnects when Paneru is back.
 `workspace_source=native` (the default) restores Mission Control spaces.
 
+## Menu bar icons on macOS 26 and later
+
+macOS 26 draws every app's menu bar icon into one shared window, so the icons
+no longer have windows for `alias` items to mirror. This fork finds them
+through Accessibility instead, by app name:
+
+```bash
+sketchybar --query default_menu_items      # "Wispr Flow,1", "Stats,3", ...
+sketchybar --add alias "Wispr Flow,1" right
+```
+
+`<app>,<n>` is the app's n-th icon from the left. The icon is cropped live from
+the menu bar. An icon hidden behind the notch shows its app's icon instead.
+
+Clicking an alias without a `click_script` clicks the icon it mirrors, so its
+menu opens. A hidden icon's app is brought forward instead, since macOS has
+nowhere to open its menu.
+
+This needs Screen Recording and Accessibility permission for the `sketchybar`
+binary. macOS ties both to the code signature, so `install-local.sh` signs with
+a stable identity. Clicks only reach the bar above the backstop level:
+use `topmost=window` when windows never cover the bar.
+
 ## Documentation
 For the full documentation of all commands and properties please refer to the [website](https://felixkratz.github.io/SketchyBar/config/bar).
 

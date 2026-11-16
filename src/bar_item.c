@@ -198,6 +198,23 @@ void bar_item_on_drag(struct bar_item* bar_item, CGPoint point) {
   }
 }
 
+// Where `bar_item` is on screen, on the display the mouse is on.
+static CGRect bar_item_frame_under_mouse(struct bar_item* bar_item) {
+  CGEventRef event = CGEventCreate(NULL);
+  CGPoint mouse = event ? CGEventGetLocation(event) : CGPointZero;
+  if (event) CFRelease(event);
+
+  CGRect fallback = CGRectNull;
+  for (int i = 0; i < bar_item->num_windows; i++) {
+    struct window* window = bar_item->windows[i];
+    if (!window) continue;
+    CGRect frame = { window->origin, window->frame.size };
+    if (CGRectContainsPoint(frame, mouse)) return frame;
+    if (CGRectIsNull(fallback)) fallback = frame;
+  }
+  return CGRectIsNull(fallback) ? (CGRect){ mouse, CGSizeZero } : fallback;
+}
+
 void bar_item_on_click(struct bar_item* bar_item, uint32_t type, uint32_t mouse_button_code, uint32_t modifier, CGPoint point) {
   if (!bar_item) return;
 
@@ -242,7 +259,7 @@ void bar_item_on_click(struct bar_item* bar_item, uint32_t type, uint32_t mouse_
   // Without a click script of its own, an alias clicks the item it mirrors.
   if (bar_item->has_alias
       && (!bar_item->click_script || strlen(bar_item->click_script) == 0)) {
-    alias_press(&bar_item->alias);
+    alias_press(&bar_item->alias, bar_item_frame_under_mouse(bar_item));
   }
 
   if (bar_item->click_script && strlen(bar_item->click_script) > 0) {

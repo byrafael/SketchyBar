@@ -24,6 +24,15 @@ bool bar_draws_item(struct bar* bar, struct bar_item* bar_item) {
         && (bar_item->type != BAR_COMPONENT_SPACE)        )
       return false;
 
+    // Each display has its own Paneru workspaces: a space item hides on a
+    // display whose current Space has no workspace with its number.
+    if (bar_item->type == BAR_COMPONENT_SPACE
+        && paneru_enabled()
+        && !bar_item->ignore_association
+        && !paneru_has_workspace(bar->dsid,
+                                 get_set_bit_position(bar_item->associated_space)))
+      return false;
+
     if (bar_item->position == POSITION_POPUP
         && (!bar_item->parent
             || !bar_item->parent->popup.drawing

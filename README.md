@@ -77,10 +77,12 @@ Space, so Mission Control indices cannot tell them apart.
 ```bash
 sketchybar --bar workspace_source=paneru
 
-for i in 1 2 3 4 5; do
-  sketchybar --add space space.$i left \
-             --set space.$i associated_space=$i icon=$i \
-                   click_script="paneru send-cmd window virtualnum $i"
+for d in 1 2; do
+  for i in 1 2 3 4 5; do
+    sketchybar --add space space.$d.$i left \
+               --set space.$d.$i display=$d associated_space=$i icon=$i \
+                     click_script="paneru send-cmd window virtualnum $i"
+  done
 done
 ```
 
@@ -91,7 +93,12 @@ With `workspace_source=paneru`:
   has a workspace N with a tiled window, or shows workspace N. Paneru keeps
   empty workspace numbers, and floating windows belong to no workspace, so an
   empty workspace is hidden until you switch to it.
-- `SELECTED` is true for the workspace each display shows.
+- Each display has its own workspace N. Give each display its own space items
+  with `display=D` as well, so each shows its own selection and apps. An item
+  without `display` is drawn on every display with a workspace N, but has one
+  `SELECTED` value for all of them.
+- `SELECTED` is true for the workspace the item's display shows, and `DID` is
+  the item's display.
 - `space_change` reports each display's Paneru workspace number.
 - `space_windows_change` reports the apps tiled on each Paneru workspace, in
   strip order. Floating windows stay on screen across workspaces, so they
